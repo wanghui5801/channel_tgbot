@@ -2,12 +2,13 @@ import time
 import feedparser
 import cloudscraper
 import requests
+import certifi
 
 # Telegram bot info
 TELEGRAM_BOT_TOKEN = ""
 CHAT_ID = ""
 
-# Only match the keywords "sell" and "buy" for Hostloc title detection
+# Only match the keywords "出" and "收" for Hostloc title detection
 HOSTLOC_KEYWORDS = ["出", "收"]
 
 RSS_FEEDS = {
@@ -24,7 +25,8 @@ def send_message_to_telegram(message):
         "parse_mode": "HTML"
     }
     try:
-        resp = requests.post(url, data=data)
+        # 指定使用 certifi 的根证书进行验证
+        resp = requests.post(url, data=data, verify=certifi.where())
         if resp.status_code != 200:
             print(f"Failed to send message to Telegram. Status code: {resp.status_code}, Response: {resp.text}")
     except Exception as e:
@@ -32,7 +34,8 @@ def send_message_to_telegram(message):
 
 
 def fetch_rss_feeds(feed_dict):
-    # Create a cloudscraper instance
+    # 创建云端爬虫实例
+    # Note: cloudscraper 基于 requests，可以在 get 请求时指定 verify 参数
     scraper = cloudscraper.create_scraper(
         browser={"browser": "chrome", "platform": "windows", "mobile": False},
         delay=10
@@ -50,7 +53,8 @@ def fetch_rss_feeds(feed_dict):
     for url, name in feed_dict.items():
         headers = common_headers
         try:
-            response = scraper.get(url, headers=headers, timeout=20)
+            # 明确指定验证证书
+            response = scraper.get(url, headers=headers, timeout=20, verify=certifi.where())
             if response.status_code == 200:
                 feed = feedparser.parse(response.content)
                 if 'entries' in feed and len(feed.entries) > 0:
@@ -59,11 +63,7 @@ def fetch_rss_feeds(feed_dict):
                         title = entry.get('title', 'No Title')
                         link = entry.get('link', 'No Link')
                         description = entry.get('summary', '')
-                        author = entry.get('author')
-                        if not author:
-                            author = entry.get('dc_creator', 'No Author')
-
-                        # Get category information
+                        author = entry.get('author') or entry.get('dc_creator', 'No Author')
                         category = entry.get('category', '').strip().lower()
 
                         entries.append((title, link, description, author, category))
@@ -115,8 +115,9 @@ def main_loop():
                                 send_message_to_telegram(message)
 
                         elif feed_name == "hostloc":
-                            # Titles containing "sell" or "buy"
+                            # Titles containing "出" or "收"
                             title_text = title.lower()
+                            # 任意一个关键词匹配即可
                             if any(kw in title_text for kw in HOSTLOC_KEYWORDS):
                                 message = (
                                     "📢 <b>Hostloc Matched Post!</b>\n"

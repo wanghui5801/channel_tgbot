@@ -2,6 +2,7 @@ import time
 import feedparser
 import cloudscraper
 import requests
+import certifi
 
 # Telegram bot info
 TELEGRAM_BOT_TOKEN = ""
@@ -33,7 +34,7 @@ def send_message_to_telegram(message):
         "parse_mode": "HTML"
     }
     try:
-        resp = requests.post(url, data=data)
+        resp = requests.post(url, data=data, verify=certifi.where())
         if resp.status_code != 200:
             print(f"Failed to send message to Telegram. Status code: {resp.status_code}, Response: {resp.text}")
     except Exception as e:
@@ -70,7 +71,8 @@ def fetch_rss_feeds(feed_dict):
             headers = lowendtalk_headers
 
         try:
-            response = scraper.get(url, headers=headers, timeout=20)
+            # 使用 verify 参数指定 certifi 的证书
+            response = scraper.get(url, headers=headers, timeout=20, verify=certifi.where())
             if response.status_code == 200:
                 feed = feedparser.parse(response.content)
                 if 'entries' in feed and len(feed.entries) > 0:
