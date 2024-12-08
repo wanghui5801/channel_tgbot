@@ -34,6 +34,7 @@ def send_message_to_telegram(message):
         "parse_mode": "HTML"
     }
     try:
+        # 这里若有SSL问题，可尝试verify=False
         resp = requests.post(url, data=data, verify=certifi.where())
         if resp.status_code != 200:
             print(f"Failed to send message to Telegram. Status code: {resp.status_code}, Response: {resp.text}")
@@ -65,49 +66,47 @@ def fetch_rss_feeds(feed_dict):
     lowendtalk_headers["Referer"] = "https://www.google.com"
 
     result = {}
-    for url, name in feed_dict.items():
-        headers = common_headers
-        if name == "lowendtalk":
-            headers = lowendtalk_headers
+    try:
+        for url, name in feed_dict.items():
+            headers = lowendtalk_headers if name == "lowendtalk" else common_headers
 
-        try:
-            # 使用 verify 参数指定 certifi 的证书
-            response = scraper.get(url, headers=headers, timeout=20, verify=certifi.where())
-            if response.status_code == 200:
-                feed = feedparser.parse(response.content)
-                if 'entries' in feed and len(feed.entries) > 0:
-                    entries = []
-                    for entry in feed.entries:
-                        title = entry.get('title', 'No Title')
-                        link = entry.get('link', 'No Link')
-                        description = entry.get('summary', '')
-
-                        # Try to get author or dc:creator
-                        author = entry.get('author')
-                        if not author:
-                            author = entry.get('dc_creator', 'No Author')
-
-                        entries.append((title, link, description, author))
-                    result[name] = entries
-                    print(f"Successfully fetched RSS feed for {name}: {url}")
+            try:
+                # 使用 verify=certifi.where()，若有问题可换成 verify=False
+                response = scraper.get(url, headers=headers, timeout=20, verify=certifi.where())
+                if response.status_code == 200:
+                    feed = feedparser.parse(response.content)
+                    if 'entries' in feed and len(feed.entries) > 0:
+                        entries = []
+                        for entry in feed.entries:
+                            title = entry.get('title', 'No Title')
+                            link = entry.get('link', 'No Link')
+                            description = entry.get('summary', '')
+                            author = entry.get('author') or entry.get('dc_creator', 'No Author')
+                            entries.append((title, link, description, author))
+                        result[name] = entries
+                        print(f"Successfully fetched RSS feed for {name}: {url}")
+                    else:
+                        print(f"Successfully fetched {name} but no RSS entries found: {url}")
+                        result[name] = []
                 else:
-                    print(f"Successfully fetched {name} but no RSS entries found: {url}")
+                    print(f"Failed to fetch RSS feed for {name}: {url}, Status code: {response.status_code}")
                     result[name] = []
-            else:
-                print(f"Failed to fetch RSS feed for {name}: {url}, Status code: {response.status_code}")
+                response.close()
+            except Exception as e:
+                print(f"Exception occurred while fetching {name} RSS feed: {url}, Error: {e}")
                 result[name] = []
-        except Exception as e:
-            print(f"Exception occurred while fetching {name} RSS feed: {url}, Error: {e}")
-            result[name] = []
+    finally:
+        # 在函数结束前关闭scraper的会话，释放资源
+        if scraper and scraper.session:
+            scraper.session.close()
+
     return result
 
 
 def main_loop():
     # Initial fetch
     old_data = fetch_rss_feeds(ALL_FEEDS)
-    old_entries = {}
-    for feed_name, entries in old_data.items():
-        old_entries[feed_name] = set(link for _, link, _, _ in entries)
+    old_entries = {feed_name: set(link for _, link, _, _ in entries) for feed_name, entries in old_data.items()}
 
     print("Starting RSS monitoring...")
     # Check every 30 seconds
@@ -125,9 +124,7 @@ def main_loop():
                 for title, link, description, author in entries:
                     if link in diff_links:
                         title_text = title.lower()
-
                         # Check if feed_name is one of the keyword-matching feeds
-                        # feed_name should match values in RSS_FEED_URLS_WITH_KEYWORDS
                         if feed_name in RSS_FEED_URLS_WITH_KEYWORDS.values():
                             if any(keyword.lower() in title_text for keyword in KEYWORDS):
                                 message = (

@@ -16,7 +16,6 @@ RSS_FEEDS = {
     "https://hostloc.com/forum.php?mod=rss": "hostloc"
 }
 
-
 def send_message_to_telegram(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     data = {
@@ -25,7 +24,6 @@ def send_message_to_telegram(message):
         "parse_mode": "HTML"
     }
     try:
-        # 指定使用 certifi 的根证书进行验证
         resp = requests.post(url, data=data, verify=certifi.where())
         if resp.status_code != 200:
             print(f"Failed to send message to Telegram. Status code: {resp.status_code}, Response: {resp.text}")
@@ -34,8 +32,7 @@ def send_message_to_telegram(message):
 
 
 def fetch_rss_feeds(feed_dict):
-    # 创建云端爬虫实例
-    # Note: cloudscraper 基于 requests，可以在 get 请求时指定 verify 参数
+    # 创建cloudscraper实例
     scraper = cloudscraper.create_scraper(
         browser={"browser": "chrome", "platform": "windows", "mobile": False},
         delay=10
@@ -50,34 +47,39 @@ def fetch_rss_feeds(feed_dict):
     }
 
     result = {}
-    for url, name in feed_dict.items():
-        headers = common_headers
-        try:
-            # 明确指定验证证书
-            response = scraper.get(url, headers=headers, timeout=20, verify=certifi.where())
-            if response.status_code == 200:
-                feed = feedparser.parse(response.content)
-                if 'entries' in feed and len(feed.entries) > 0:
-                    entries = []
-                    for entry in feed.entries:
-                        title = entry.get('title', 'No Title')
-                        link = entry.get('link', 'No Link')
-                        description = entry.get('summary', '')
-                        author = entry.get('author') or entry.get('dc_creator', 'No Author')
-                        category = entry.get('category', '').strip().lower()
-
-                        entries.append((title, link, description, author, category))
-                    result[name] = entries
-                    print(f"Successfully fetched RSS feed for {name}: {url}")
+    try:
+        for url, name in feed_dict.items():
+            headers = common_headers
+            try:
+                response = scraper.get(url, headers=headers, timeout=20, verify=certifi.where())
+                if response.status_code == 200:
+                    feed = feedparser.parse(response.content)
+                    if 'entries' in feed and len(feed.entries) > 0:
+                        entries = []
+                        for entry in feed.entries:
+                            title = entry.get('title', 'No Title')
+                            link = entry.get('link', 'No Link')
+                            description = entry.get('summary', '')
+                            author = entry.get('author') or entry.get('dc_creator', 'No Author')
+                            category = entry.get('category', '').strip().lower()
+                            entries.append((title, link, description, author, category))
+                        result[name] = entries
+                        print(f"Successfully fetched RSS feed for {name}: {url}")
+                    else:
+                        print(f"Successfully fetched {name} but no RSS entries found: {url}")
+                        result[name] = []
                 else:
-                    print(f"Successfully fetched {name} but no RSS entries found: {url}")
+                    print(f"Failed to fetch RSS feed for {name}: {url}, Status code: {response.status_code}")
                     result[name] = []
-            else:
-                print(f"Failed to fetch RSS feed for {name}: {url}, Status code: {response.status_code}")
+                # 关闭当前response资源
+                response.close()
+            except Exception as e:
+                print(f"Exception occurred while fetching {name} RSS feed: {url}, Error: {e}")
                 result[name] = []
-        except Exception as e:
-            print(f"Exception occurred while fetching {name} RSS feed: {url}, Error: {e}")
-            result[name] = []
+    finally:
+        # 函数结束前关闭scraper释放资源
+        scraper.close()
+
     return result
 
 
@@ -117,7 +119,6 @@ def main_loop():
                         elif feed_name == "hostloc":
                             # Titles containing "出" or "收"
                             title_text = title.lower()
-                            # 任意一个关键词匹配即可
                             if any(kw in title_text for kw in HOSTLOC_KEYWORDS):
                                 message = (
                                     "📢 <b>Hostloc Matched Post!</b>\n"
